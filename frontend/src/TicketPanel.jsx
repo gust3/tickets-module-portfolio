@@ -10,20 +10,46 @@ export default function TicketPanel({ employee, selectedId, sources, onChanged }
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
 
-  useEffect(() => {
-    if (!selectedId) {
-      setTicket(null);
-      return;
-    }
-    setLoading(true);
-    setError('');
-    setMessage('');
-    api(`/tickets/${selectedId}`).then(data => {
-      setTicket(data.ticket);
-      setHistory(data.history);
-      setSourceId(String(data.ticket.source?.id ?? ''));
-    }).catch(error => setError(error.message)).finally(() => setLoading(false));
-  }, [selectedId]);
+    useEffect(() => {
+
+        if (!selectedId) {
+            setTicket(null);
+            return;
+        }
+
+        // 1. Флаг для единообразия с App.jsx и защиты на уровне JS
+        let active = true;
+
+        // 2. AbortController для физической отмены сетевого запроса
+        const controller = new AbortController();
+        const signal = controller.signal;
+
+        setLoading(true);
+        setError('');
+        setMessage('');
+
+        api(`/tickets/${selectedId}`, { signal })
+            .then(data => {
+                if (!active) return; // Двойная проверка перед обновлением стейта
+                setTicket(data.ticket);
+                setHistory(data.history);
+                setSourceId(String(data.ticket.source?.id ?? ''));
+            })
+            .catch(error => {
+                if (error.name === 'AbortError') return; // Штатная отмена, не ошибка
+                if (!active) return; // Если компонент уже неактивен, игнорируем
+                setError(error.message);
+            })
+            .finally(() => {
+                if (active && !signal.aborted) setLoading(false);
+            });
+
+        // 3. Cleanup: срабатывает при смене ID или размонтировании
+        return () => {
+            active = false;
+            controller.abort();
+        };
+    }, [selectedId]);
 
   async function save() {
     if (!ticket || saving) return;
