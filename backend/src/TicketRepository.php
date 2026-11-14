@@ -63,8 +63,18 @@ class TicketRepository
         if (!pg_fetch_assoc(query('SELECT id FROM sources WHERE id=$1', array($sourceId)))) {
             respond(400, array('error' => 'invalid_source', 'message' => 'Источник не найден'));
         }
-        query('UPDATE tickets SET source_id=$1, updated_at=clock_timestamp() WHERE id=$2', array($sourceId, $id));
-        query('INSERT INTO ticket_history(ticket_id, employee_id, old_source_id, new_source_id) VALUES($1,$2,$3,$4)', array($id, $employee['id'], $ticket['source_id'], $sourceId));
+
+        // ✅ Атомарность: оборачиваем оба запроса в транзакцию
+        query('BEGIN');
+        try {
+            query('UPDATE tickets SET source_id=$1, updated_at=clock_timestamp() WHERE id=$2', array($sourceId, $id));
+            query('INSERT INTO ticket_history(ticket_id, employee_id, old_source_id, new_source_id) VALUES($1,$2,$3,$4)', array($id, $employee['id'], $ticket['source_id'], $sourceId));
+            query('COMMIT');
+        } catch (Exception $e) {
+            query('ROLLBACK');
+            throw $e;
+        }
+
         return $this->find($id);
     }
 }
