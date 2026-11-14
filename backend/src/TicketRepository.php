@@ -56,23 +56,23 @@ class TicketRepository
 
     public function changeSource($id, $sourceId, array $employee)
     {
-        // 1. Получаем текущее состояние заявки (включая статус и source_id)
+        // 1. ПРОВЕРКА НАЛИЧИЯ ЗАЯВКИ (404)
         $ticket = pg_fetch_assoc(query('SELECT id, status, source_id FROM tickets WHERE id=$1', array($id)));
         if (!$ticket) {
             respond(404, array('error' => 'not_found', 'message' => 'Заявка не найдена'));
         }
 
-        // 2. Проверяем, что источник существует
-        if (!pg_fetch_assoc(query('SELECT id FROM sources WHERE id=$1', array($sourceId)))) {
-            respond(400, array('error' => 'invalid_source', 'message' => 'Источник не найден'));
-        }
-
-        // 3. ✅ НОВОЕ: Проверка на архивную заявку (Требование ТЗ: 403)
+        // 2. ПРОВЕРКА ЗАПРЕТА АРХИВА (403) — должна идти ДО проверки источника
         if ($ticket['status'] === 'archived') {
             respond(403, array('error' => 'forbidden', 'message' => 'Архивная заявка доступна только для чтения'));
         }
 
-        // 4. ✅ НОВОЕ: Пропускаем изменение, если источник не поменялся (Требование ТЗ)
+        // 3. ПРОВЕРКА КОРРЕКТНОСТИ ИСТОЧНИКА (400)
+        if (!pg_fetch_assoc(query('SELECT id FROM sources WHERE id=$1', array($sourceId)))) {
+            respond(400, array('error' => 'invalid_source', 'message' => 'Источник не найден'));
+        }
+
+        // 4. Пропускаем изменение, если источник не поменялся
         if ((int) $ticket['source_id'] === $sourceId) {
             return $this->find($id);
         }
