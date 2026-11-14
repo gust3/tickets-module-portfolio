@@ -51,23 +51,40 @@ export default function TicketPanel({ employee, selectedId, sources, onChanged }
         };
     }, [selectedId]);
 
-  async function save() {
-    if (!ticket || saving) return;
-    setSaving(true);
-    setError('');
-    setMessage('');
-    try {
-      const data = await api(`/tickets/${ticket.id}/source`, { method: 'POST', body: JSON.stringify({ source_id: Number(sourceId) }) });
-      setTicket(data.ticket);
-      setHistory(data.history);
-      setMessage('Источник сохранён');
-      onChanged(data.ticket);
-    } catch (error) {
-      setError(error.message);
-    } finally {
-      setSaving(false);
+    async function save() {
+        if (!ticket || saving) return;
+
+        // 1. Запоминаем ID заявки, которую начали сохранять, до любого await
+        const savedTicketId = ticket.id;
+
+        setSaving(true);
+        setError('');
+        setMessage('');
+
+        try {
+            const data = await api(`/tickets/${savedTicketId}/source`, {
+                method: 'POST',
+                body: JSON.stringify({ source_id: Number(sourceId) })
+            });
+
+            // 2. ЗАЩИТА ОТ ПОЗДНЕГО ОТВЕТА: если пользователь переключил заявку, игнорируем результат
+            if (savedTicketId !== selectedId) return;
+
+            setTicket(data.ticket);
+            setHistory(data.history);
+            setMessage('Источник сохранён');
+            onChanged(data.ticket);
+        } catch (error) {
+            // 3. Защита от позднего ответа при ошибке
+            if (savedTicketId !== selectedId) return;
+            setError(error.message);
+        } finally {
+            // 4. Снимаем блокировку только если это всё ещё актуальная заявка
+            if (savedTicketId === selectedId) {
+                setSaving(false);
+            }
+        }
     }
-  }
 
   const canEdit = employee.permissions.includes('FUNC_TICKETS_SOURCE_EDIT') && ticket?.status !== 'archived';
   const sourceName = id => sources.find(source => source.id === id)?.name ?? 'Не указан';
