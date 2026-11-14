@@ -9,20 +9,26 @@ class TicketRepository
         }
         return $rows;
     }
-
     public function find($id)
     {
         $row = pg_fetch_assoc(query('SELECT id, title, description, status, source_id, updated_at FROM tickets WHERE id=$1', array($id)));
         if (!$row) {
             return null;
         }
-        $source = pg_fetch_assoc(query('SELECT id, name FROM sources WHERE id=$1', array($row['source_id'])));
+
+        // ✅ Защита от NULL: запрашиваем источник только если source_id не NULL
+        $source = null;
+        if ($row['source_id'] !== null) {
+            $source = pg_fetch_assoc(query('SELECT id, name FROM sources WHERE id=$1', array($row['source_id'])));
+        }
+
         return array(
             'id' => (int) $row['id'],
             'title' => $row['title'],
             'description' => $row['description'],
             'status' => $row['status'],
-            'source' => array('id' => (int) $source['id'], 'name' => $source['name']),
+            // ✅ Возвращаем null вместо краша, если источника нет
+            'source' => $source ? array('id' => (int) $source['id'], 'name' => $source['name']) : null,
             'updated_at' => $row['updated_at'],
         );
     }
