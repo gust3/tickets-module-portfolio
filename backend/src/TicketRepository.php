@@ -64,7 +64,12 @@ class TicketRepository
             respond(400, array('error' => 'invalid_source', 'message' => 'Источник не найден'));
         }
 
-        // ✅ Атомарность: оборачиваем оба запроса в транзакцию
+        // ✅ Проверка: если источник не изменился, возвращаем текущее состояние без изменений
+        if ((int) $ticket['source_id'] === $sourceId) {
+            return $this->find($id);
+        }
+
+        // Атомарность: оборачиваем оба запроса в транзакцию
         query('BEGIN');
         try {
             query('UPDATE tickets SET source_id=$1, updated_at=clock_timestamp() WHERE id=$2', array($sourceId, $id));
