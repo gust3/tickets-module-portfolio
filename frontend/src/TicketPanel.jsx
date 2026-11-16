@@ -2,25 +2,27 @@ import React, { useEffect, useState } from 'react';
 import { api } from './api.js';
 
 export default function TicketPanel({ employee, selectedId, sources, onChanged }) {
-  const [ticket, setTicket] = useState(null);
-  const [history, setHistory] = useState([]);
-  const [sourceId, setSourceId] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState('');
-  const [message, setMessage] = useState('');
+    const [ticket, setTicket] = useState(null);
+    const [history, setHistory] = useState([]);
+    const [sourceId, setSourceId] = useState('');
+    const [loading, setLoading] = useState(false);
+
+    // Храним массив ID заявок, которые сейчас сохраняются, а не просто boolean
+    const [savingTicketIds, setSavingTicketIds] = useState([]);
+
+    const [error, setError] = useState('');
+    const [message, setMessage] = useState('');
 
     useEffect(() => {
-
         if (!selectedId) {
             setTicket(null);
             return;
         }
 
-        // 1. Флаг для единообразия с App.jsx и защиты на уровне JS
+        // 1. Флаг для защиты на уровне JS при загрузке
         let active = true;
 
-        // 2. AbortController для физической отмены сетевого запроса
+        // 2. AbortController для физической отмены сетевого запроса загрузки
         const controller = new AbortController();
         const signal = controller.signal;
 
@@ -30,14 +32,14 @@ export default function TicketPanel({ employee, selectedId, sources, onChanged }
 
         api(`/tickets/${selectedId}`, { signal })
             .then(data => {
-                if (!active) return; // Двойная проверка перед обновлением стейта
+                if (!active) return;
                 setTicket(data.ticket);
                 setHistory(data.history);
                 setSourceId(String(data.ticket.source?.id ?? ''));
             })
             .catch(error => {
-                if (error.name === 'AbortError') return; // Штатная отмена, не ошибка
-                if (!active) return; // Если компонент уже неактивен, игнорируем
+                if (error.name === 'AbortError') return;
+                if (!active) return;
                 setError(error.message);
             })
             .finally(() => {
@@ -52,12 +54,16 @@ export default function TicketPanel({ employee, selectedId, sources, onChanged }
     }, [selectedId]);
 
     async function save() {
-        if (!ticket || saving) return;
+        if (!ticket) return;
 
-        // 1. Запоминаем ID заявки, которую начали сохранять, до любого await
+        // 1. ГЛАВНАЯ ЗАЩИТА: Если эта конкретная заявка уже есть в массиве сохраняемых,
+        // мы игнорируем нажатие. Это предотвращает дублирование даже после ухода и возврата.
+        if (savingTicketIds.includes(ticket.id)) return;
+
         const savedTicketId = ticket.id;
 
-        setSaving(true);
+        // 2. Добавляем ID этой заявки в массив сохраняемых
+        setSavingTicketIds(prev => [...prev, savedTicketId]);
         setError('');
         setMessage('');
 
@@ -67,7 +73,8 @@ export default function TicketPanel({ employee, selectedId, sources, onChanged }
                 body: JSON.stringify({ source_id: Number(sourceId) })
             });
 
-            // 2. ЗАЩИТА ОТ ПОЗДНЕГО ОТВЕТА: если пользователь переключил заявку, игнорируем результат
+            // 3. ЗАЩИТА ОТ ПОЗДНЕГО ОТВЕТА: если пользователь переключил заявку,
+            // мы не обновляем UI текущей заявки устаревшими данными
             if (savedTicketId !== selectedId) return;
 
             setTicket(data.ticket);
@@ -75,32 +82,90 @@ export default function TicketPanel({ employee, selectedId, sources, onChanged }
             setMessage('Источник сохранён');
             onChanged(data.ticket);
         } catch (error) {
-            // 3. Защита от позднего ответа при ошибке
             if (savedTicketId !== selectedId) return;
             setError(error.message);
         } finally {
-            // 4. Снимаем блокировку только если это всё ещё актуальная заявка
-            if (savedTicketId === selectedId) {
-                setSaving(false);
-            }
+            // 4. ВСЕГДА удаляем ID этой заявки из массива, когда её запрос завершился.
+            // Мы делаем это независимо от того, на какой заявке сейчас пользователь,
+            // чтобы "убрать за собой" и корректно разблокировать именно эту заявку.
+            setSavingTicketIds(prev => prev.filter(id => id !== savedTicketId));
         }
     }
 
-  const canEdit = employee.permissions.includes('FUNC_TICKETS_SOURCE_EDIT') && ticket?.status !== 'archived';
-  const sourceName = id => sources.find(source => source.id === id)?.name ?? 'Не указан';
+    const canEdit = employee.permissions.includes('FUNC_TICKETS_SOURCE_EDIT') && ticket?.status !== 'archived';
+    const sourceName = id => sources.find(source => source.id === id)?.name ?? 'Не указан';
 
-  return <section className="ticket-panel" aria-label="Карточка заявки">
-    {!selectedId && <div className="empty"><h2>Выберите заявку</h2><p>Карточка и история изменений появятся здесь.</p></div>}
-    {selectedId && loading && <p role="status" className="muted">Загрузка карточки…</p>}
-    {error && <p className="error" role="alert">{error}</p>}
-    {selectedId && !loading && ticket && <>
-      <div className="panel-heading"><span className="muted">Заявка #{ticket.id}</span><h2>{ticket.title}</h2><p>{ticket.description}</p></div>
-      <div className="source-box"><label htmlFor="source">Источник заявки</label>
-        {canEdit ? <div className="source-controls"><select id="source" value={sourceId} onChange={event => setSourceId(event.target.value)} disabled={saving}><option value="" disabled>Выберите источник</option>{sources.map(source => <option key={source.id} value={source.id}>{source.name}</option>)}</select><button onClick={save} disabled={saving || !sourceId}>{saving ? 'Сохранение…' : 'Сохранить'}</button></div> : <p>{ticket.source?.name ?? 'Не указан'}</p>}
-        {ticket.status === 'archived' && <p className="muted">Архивная заявка доступна только для чтения.</p>}
-        {message && <p className="success" role="status">{message}</p>}
-      </div>
-      <div className="history"><h3>История изменения источника</h3>{history.length === 0 ? <p className="muted">Изменений пока нет.</p> : <ol>{history.map(item => <li key={item.id}><strong>{item.employee_name}</strong><p>{sourceName(item.old_source_id)} → {sourceName(item.new_source_id)}</p><time>{new Date(item.created_at).toLocaleString('ru-RU')}</time></li>)}</ol>}</div>
-    </>}
-  </section>;
+    return (
+        <section className="ticket-panel" aria-label="Карточка заявки">
+            {!selectedId && (
+                <div className="empty">
+                    <h2>Выберите заявку</h2>
+                    <p>Карточка и история изменений появятся здесь.</p>
+                </div>
+            )}
+
+            {selectedId && loading && <p role="status" className="muted">Загрузка карточки…</p>}
+            {error && <p className="error" role="alert">{error}</p>}
+
+            {selectedId && !loading && ticket && (
+                <>
+                    <div className="panel-heading">
+                        <span className="muted">Заявка #{ticket.id}</span>
+                        <h2>{ticket.title}</h2>
+                        <p>{ticket.description}</p>
+                    </div>
+
+                    <div className="source-box">
+                        <label htmlFor="source">Источник заявки</label>
+                        {canEdit ? (
+                            <div className="source-controls">
+                                <select
+                                    id="source"
+                                    value={sourceId}
+                                    onChange={event => setSourceId(event.target.value)}
+                                    disabled={savingTicketIds.includes(ticket?.id)}
+                                >
+                                    <option value="" disabled>Выберите источник</option>
+                                    {sources.map(source => (
+                                        <option key={source.id} value={source.id}>{source.name}</option>
+                                    ))}
+                                </select>
+
+                                <button
+                                    onClick={save}
+                                    disabled={savingTicketIds.includes(ticket?.id) || !sourceId}
+                                >
+                                    {savingTicketIds.includes(ticket?.id) ? 'Сохранение…' : 'Сохранить'}
+                                </button>
+                            </div>
+                        ) : (
+                            <p>{ticket.source?.name ?? 'Не указан'}</p>
+                        )}
+
+                        {ticket.status === 'archived' && (
+                            <p className="muted">Архивная заявка доступна только для чтения.</p>
+                        )}
+                        {message && <p className="success" role="status">{message}</p>}
+                    </div>
+
+                    <div className="history">
+                        <h3>История изменения источника</h3>
+                        {history.length === 0 ? (
+                            <p className="muted">Изменений пока нет.</p>
+                        ) : (
+                            <ol>
+                                {history.map(item => (
+                                    <li key={item.id}>
+                                        <strong>{item.employee_name}</strong>
+                                        <p>{sourceName(item.old_source_id)} → {sourceName(item.new_source_id)}</p>
+                                        <time>{new Date(item.created_at).toLocaleString('ru-RU')}</time>
+                                    </li>
+                                ))}
+                            </ol>
+                        )}
+                    </div>
+                </>
+            )}
+        </section>
+    );
 }
