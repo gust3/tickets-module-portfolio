@@ -73,21 +73,24 @@ export default function TicketPanel({ employee, selectedId, sources, onChanged }
                 body: JSON.stringify({ source_id: Number(sourceId) })
             });
 
-            // 3. ЗАЩИТА ОТ ПОЗДНЕГО ОТВЕТА: если пользователь переключил заявку,
-            // мы не обновляем UI текущей заявки устаревшими данными
-            if (savedTicketId !== selectedId) return;
-
-            setTicket(data.ticket);
-            setHistory(data.history);
-            setMessage('Источник сохранён');
+            // 1. ВСЕГДА уведомляем родителя об изменении, чтобы обновился список заявок.
+            // Это работает даже если пользователь уже переключился на другую заявку.
             onChanged(data.ticket);
+
+            // 2. Обновляем локальный UI карточки ТОЛЬКО если пользователь всё ещё на этой заявке.
+            // Это защищает от затирания новых данных старым ответом.
+            if (savedTicketId === selectedId) {
+                setTicket(data.ticket);
+                setHistory(data.history);
+                setMessage('Источник сохранён');
+            }
         } catch (error) {
-            if (savedTicketId !== selectedId) return;
-            setError(error.message);
+            // Показываем ошибку только если пользователь всё ещё на этой заявке
+            if (savedTicketId === selectedId) {
+                setError(error.message);
+            }
         } finally {
-            // 4. ВСЕГДА удаляем ID этой заявки из массива, когда её запрос завершился.
-            // Мы делаем это независимо от того, на какой заявке сейчас пользователь,
-            // чтобы "убрать за собой" и корректно разблокировать именно эту заявку.
+            // ВСЕГДА удаляем ID из массива сохраняемых
             setSavingTicketIds(prev => prev.filter(id => id !== savedTicketId));
         }
     }
