@@ -10,5 +10,11 @@ export default defineConfig({
             usePolling: true,
             interval: 100,
         },
+        build: {
+            sourcemap: true, // Включаем source maps для production
+        },
+        esbuild: {
+            sourcemap: true, // Включаем source maps для esbuild
+        },
     },
 });
